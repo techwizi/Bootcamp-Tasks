@@ -1,0 +1,68 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+
+// Define the pins for the ultrasonic sensor
+const int trigPin = D1;  // Trigger pin
+const int echoPin = D2;  // Echo pin
+
+ESP8266WebServer server(80);
+
+void handleRoot() {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  long duration = pulseIn(echoPin, HIGH);
+  float distance = duration * 0.034 / 2;
+
+  String page = "<html><head><script>function updateDistance() {"
+                "  var xhttp = new XMLHttpRequest();"
+                "  xhttp.onreadystatechange = function() {"
+                "    if (this.readyState == 4 && this.status == 200) {"
+                "      document.getElementById('distance').innerHTML = this.responseText;"
+                "    }"
+                "  };"
+                "  xhttp.open('GET', '/distance', true);"
+                "  xhttp.send();"
+                "}"
+                "setInterval(updateDistance, 1000);"
+                "</script></head><body>";
+  page += "<h1>Ultrasonic Sensor Reading</h1>";
+  page += "<p>Distance: <span id='distance'>" + String(distance) + " cm</span></p>";
+  page += "</body></html>";
+
+  server.send(200, "text/html", page);
+}
+
+void handleDistance() {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  long duration = pulseIn(echoPin, HIGH);
+  float distance = duration * 0.034 / 2;
+  Serial.println(distance);
+  server.send(200, "text/plain", String(distance));
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+
+  WiFi.softAP("ESP8266-AP", "password");  // Create an access point
+
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/distance", HTTP_GET, handleDistance); // New route for distance data
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
+}
