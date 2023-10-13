@@ -1,0 +1,58 @@
+import paho.mqtt.client as mqtt
+import time
+
+# MQTT settings
+mqtt_server = "YOUR_RASPBERRY_PI_IP"
+mqtt_port = 1883
+mq135_topic = "mq135/data"
+moisture_topic = "moisture/data"
+
+# Threshold values
+mq135_threshold = 200  # Set your desired MQ135 threshold value
+moisture_threshold = 50  # Set your desired moisture threshold value
+
+# Callback when connected to the MQTT broker
+def on_connect(client, userdata, flags, rc):
+    print("Connected to MQTT Broker with result code " + str(rc))
+    client.subscribe(mq135_topic)
+    client.subscribe(moisture_topic)
+
+# Callback when a message is received from the MQTT broker
+def on_message(client, userdata, msg):
+    print("Received message on topic " + msg.topic + ": " + str(msg.payload, 'utf-8'))
+
+    if msg.topic == mq135_topic:
+        try:
+            mq135_value = int(msg.payload.decode())
+            if mq135_value > mq135_threshold:
+                print("MQ135 value exceeds the threshold. Taking action...")
+                # Perform an action when MQ135 value exceeds the threshold
+                # You can add your code here to take specific actions
+        except ValueError:
+            print("Invalid MQ135 value received.")
+
+    elif msg.topic == moisture_topic:
+        try:
+            moisture_value = int(msg.payload.decode())
+            if moisture_value < moisture_threshold:
+                print("Moisture level is below the threshold. Sending control signal to NodeMCU...")
+                client.publish("moisture/ctrl", "on")
+                # Perform an action when moisture level is below the threshold
+                # You can add your code here to take specific actions
+                
+            else:
+                print("Moisture level is above the threshold. Sending control signal to NodeMCU to turn off.")
+                client.publish("moisture/ctrl", "off")
+        except ValueError:
+            print("Invalid moisture value received.")
+
+# Create MQTT client
+client = mqtt.Client()
+client.on_connect = on_connect
+client.on_message = on_message
+
+# Connect to MQTT broker
+client.connect(mqtt_server, mqtt_port, 60)
+
+# Loop to listen for messages
+client.loop_forever()
