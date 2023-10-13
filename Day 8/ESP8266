@@ -1,0 +1,146 @@
+#include <Arduino.h>
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+#include <Servo.h>  // Include the Servo library
+
+// Constants
+#define WIFI_SSID "Utkarsh"
+#define WIFI_PASS "nodemcu8266"
+
+#define MQTT_SERVER "192.168.26.122 2409:4063:4e19:b676:7a24:1e41:527c:e982"  // MQTT broker IP address
+#define MQTT_PORT 1883
+
+#define MQTT_PUB_AIR_QUALITY "air_quality/data"
+#define MQTT_SUB_AIR_QUALITY "air_quality/ctrl"
+#define MQTT_PUB_SOIL_MOISTURE "soil_moisture/data"
+#define MQTT_SUB_SOIL_MOISTURE "soil_moisture/ctrl"
+#define MQTT_SUB_SOIL_MOISTURE_THRESHOLD "soil_moisture/threshold"
+
+// NodeMCU pins
+const int ledPin = 3;  // Built-in LED
+const int mq135Pin = A0;  // Analog input pin for MQ135 sensor
+const int soil_moisture_pin = D0; // Analog input pin for soil moisture sensor
+
+// Global variables
+unsigned long previousMillis = 0;
+const long interval = 1000 * 5;  // 5 seconds
+int airQualityThreshold = 200;
+int soilMoistureThreshold = 400;
+
+Servo servo;  // Create a Servo object
+
+// Setup WiFi and MQTT
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
+
+void reconnect() {
+    while (!mqttClient.connected()) {
+        Serial.print("Attempting MQTT connection...");
+
+        if (mqttClient.connect("ESP8266Client")) {
+            Serial.println("connected");
+            mqttClient.subscribe(MQTT_SUB_AIR_QUALITY);
+            mqttClient.subscribe(MQTT_SUB_SOIL_MOISTURE);
+            mqttClient.subscribe(MQTT_SUB_SOIL_MOISTURE_THRESHOLD);
+        } else {
+            Serial.print("failed, rc=");
+            Serial.print(mqttClient.state());
+            Serial.println(" try again in 5 seconds");
+
+            delay(5000);
+        }
+    }
+}
+
+void callback(char* topic, byte* payload, unsigned int length) {
+    Serial.print("Message arrived [");
+    Serial.print(topic);
+    Serial.print("] ");
+
+    String message = "";
+    for (int i = 0; i < (int)length; i++) {
+        message += (char)payload[i];
+    }
+
+    Serial.println(message);
+
+    if (String(topic) == MQTT_SUB_AIR_QUALITY) {
+        if (message == "on") {
+            digitalWrite(ledPin, HIGH);
+        } else if (message == "off") {
+            digitalWrite(ledPin, LOW);
+        }
+    } else if (String(topic) == MQTT_SUB_SOIL_MOISTURE_THRESHOLD) {
+        soilMoistureThreshold = message.toInt();
+        Serial.println("Updated soil moisture threshold: " + String(soilMoistureThreshold));
+    }
+}
+
+void setup() {
+    Serial.begin(9600);
+
+    // Set pin modes
+    pinMode(ledPin, OUTPUT);
+
+    // Connect to WiFi
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+
+    Serial.println("");
+    Serial.println("WiFi connected");
+
+    // Connect to MQTT
+    mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
+    mqttClient.setCallback(callback);
+
+    // Attach the servo to the GPIO pin
+    servo.attach(D1); // Change D1 to the desired GPIO pin for the servo
+    servo.write(0);  // Initialize the servo at 0 degrees
+}
+
+void loop() {
+    if (!mqttClient.connected()) {
+        reconnect();
+    }
+
+    unsigned long currentMillis = millis();
+
+    if (currentMillis - previousMillis >= interval) {
+        previousMillis = currentMillis;
+
+        // Read analog data from MQ135 sensor
+        int airQualityValue = analogRead(mq135Pin);
+        int soilMoistureValue = analogRead(soil_moisture_pin); // Read soil moisture analog value
+
+        Serial.println("Air Quality: " + String(airQualityValue));
+        Serial.println("Soil Moisture: " + String(soilMoistureValue));
+
+        String airQualityMessage = String(airQualityValue);
+        String soilMoistureMessage = String(soilMoistureValue);
+
+        mqttClient.publish(MQTT_PUB_AIR_QUALITY, airQualityMessage.c_str());
+        mqttClient.publish(MQTT_PUB_SOIL_MOISTURE, soilMoistureMessage.c_str());
+
+        if (airQualityValue > airQualityThreshold) {
+            mqttClient.publish(MQTT_SUB_AIR_QUALITY, "on");
+        } else {
+            mqttClient.publish(MQTT_SUB_AIR_QUALITY, "off");
+        }
+
+        if (soilMoistureValue < soilMoistureThreshold) {
+            // Soil moisture is below the threshold, move the servo to 90 degrees
+            mqttClient.publish(MQTT_SUB_SOIL_MOISTURE, "on");
+        } else {
+            // Soil moisture is above the threshold, move the servo to 0 degrees
+            mqttClient.publish(MQTT_SUB_SOIL_MOISTURE, "off");
+            servo.write(175);
+            servo.write(0);
+        }
+    }
+
+    mqttClient.loop();
+}
